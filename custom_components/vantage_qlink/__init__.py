@@ -69,23 +69,32 @@ PLATFORMS: list[Platform] = [Platform.LIGHT, Platform.COVER, Platform.EVENT]
 LED_STATES = {"off": 0, "on": 1, "blink": 2}
 
 
-def parse_id_list(raw: Any) -> list[int]:
-    """Parse the comma-separated contractor-number option string."""
+def parse_id_list(raw: Any) -> list[int | str]:
+    """Parse the comma-separated load-ID option string.
+
+    Two forms, both inherited from 0.0.x:
+    - ``1005``   — contractor number (``VGL 1005``)
+    - ``2-33-8`` — dash-separated station-bus load address; sent with the
+      dashes replaced by spaces (``VGL 2 33 8``), addressing
+      master/station/load for LVRS / wall-box dimmer loads.
+    """
     if raw is None:
         return []
     if isinstance(raw, (list, tuple)):
         items = [str(i) for i in raw]
     else:
         items = str(raw).split(",")
-    out: list[int] = []
+    out: list[int | str] = []
     for item in items:
         item = item.strip()
         if not item:
             continue
-        try:
+        if item.isdigit():
             out.append(int(item))
-        except ValueError:
-            _LOGGER.warning("Ignoring non-numeric contractor number %r", item)
+        elif all(part.isdigit() for part in item.split("-")) and "-" in item:
+            out.append(item)
+        else:
+            _LOGGER.warning("Ignoring unparseable load id %r", item)
     return out
 
 
@@ -239,7 +248,13 @@ def _wire_push_handlers(hass: HomeAssistant, runtime: QLinkRuntime) -> None:
                 return
             master, station, load, level = vals
             phys_key = f"s{master}-{station}-{load}"
-            coordinator.handle_load_push(phys_key, level)
+            # Station loads configured in dash form ("2-33-8") are the
+            # push address verbatim — map deterministically, no learning.
+            direct_id = f"{master}-{station}-{load}"
+            if direct_id in coordinator.loads:
+                coordinator.apply_level(direct_id, level)
+            else:
+                coordinator.handle_load_push(phys_key, level)
             hass.bus.async_fire(
                 EVENT_LOAD_CHANGED,
                 {

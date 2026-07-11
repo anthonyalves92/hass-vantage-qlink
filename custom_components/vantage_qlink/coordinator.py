@@ -50,7 +50,7 @@ class _Observation:
     ts: float = field(default_factory=time.monotonic)
 
 
-class QLinkCoordinator(DataUpdateCoordinator[dict[int, int]]):
+class QLinkCoordinator(DataUpdateCoordinator[dict[int | str, int]]):
     """Sweeps configured contractor loads and folds in push updates."""
 
     def __init__(
@@ -58,7 +58,7 @@ class QLinkCoordinator(DataUpdateCoordinator[dict[int, int]]):
         hass: HomeAssistant,
         hub: QLinkHub,
         entry_id: str,
-        loads: list[int],
+        loads: list[int | str],
         scan_interval: int,
     ) -> None:
         super().__init__(
@@ -99,7 +99,7 @@ class QLinkCoordinator(DataUpdateCoordinator[dict[int, int]]):
 
     async def _async_update_data(self) -> dict[int, int]:
         old = dict(self.data) if self.data else {}
-        levels: dict[int, int] = {}
+        levels: dict[int | str, int] = {}
         try:
             for con in self.loads:
                 levels[con] = await self.hub.get_load_level(con)
@@ -114,7 +114,7 @@ class QLinkCoordinator(DataUpdateCoordinator[dict[int, int]]):
 
     # -------------------------------------------------------- push intake
 
-    def note_write(self, contractor_number: int, level: int) -> None:
+    def note_write(self, contractor_number: int | str, level: int) -> None:
         """Record an HA-initiated level write (for mapping attribution)."""
         now = time.monotonic()
         self._recent_writes = [
@@ -147,7 +147,7 @@ class QLinkCoordinator(DataUpdateCoordinator[dict[int, int]]):
         self._observations.append(_Observation(phys_key, level))
         self.hass.async_create_task(self._push_debouncer.async_call())
 
-    def apply_level(self, contractor_number: int, level: int) -> None:
+    def apply_level(self, contractor_number: int | str, level: int) -> None:
         """Fold a known level into coordinator data and notify entities."""
         data = dict(self.data) if self.data else {}
         if contractor_number not in self.loads:

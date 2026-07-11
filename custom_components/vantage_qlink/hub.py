@@ -404,19 +404,30 @@ class QLinkHub:
         except ValueError as err:
             raise QLinkError(f"Unparseable reply: {lines[0]}") from err
 
-    async def get_load_level(self, contractor_number: int) -> int:
+    @staticmethod
+    def _load_args(load_id: int | str) -> tuple[Any, ...]:
+        """A load id is a contractor number or a dash-form station address.
+
+        ``"2-33-8"`` becomes three positional args (master station load),
+        matching how 0.0.x addressed station-bus loads.
+        """
+        if isinstance(load_id, str) and "-" in load_id:
+            return tuple(load_id.split("-"))
+        return (load_id,)
+
+    async def get_load_level(self, load_id: int | str) -> int:
         """VGL# <n> -> RGL <n> <level> (bare <level> tolerated)."""
         lines = await self.command(
-            "VGL", contractor_number, prefixes=("RGL",), accept_bare=True
+            "VGL", *self._load_args(load_id), prefixes=("RGL",), accept_bare=True
         )
         return self._tail_int(lines, drop_prefix_args=2)
 
     async def set_load_level(
-        self, contractor_number: int, level: int, fade: float = 0.0
+        self, load_id: int | str, level: int, fade: float = 0.0
     ) -> None:
         """VLO# <n> <level> <fade> -> RLO <n> <level> <fade>."""
         level = max(0, min(100, int(level)))
-        args: tuple[Any, ...] = (contractor_number, level)
+        args: tuple[Any, ...] = (*self._load_args(load_id), level)
         if fade:
             args += (round(float(fade), 1),)
         await self.command("VLO", *args, prefixes=("RLO",), accept_bare=True)
