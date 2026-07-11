@@ -1,0 +1,227 @@
+send_command:
+  name: Send raw command
+  description: >-
+    Send a raw QLink V-command to the controller and return the reply.
+    See the QLink protocol reference for the command set (VGL, VLO, VSW,
+    VGN, VQT, ...).
+  fields:
+    command:
+      name: Command
+      description: "The command line, e.g. 'VGL 1005' or 'VGN 1 5 255'."
+      required: true
+      example: "VGL 1005"
+      selector:
+        text:
+    timeout:
+      name: Timeout
+      description: Seconds to wait for the reply.
+      selector:
+        number:
+          min: 1
+          max: 30
+          step: 0.5
+          unit_of_measurement: s
+
+set_load_level:
+  name: Set load level
+  description: Set a load (by contractor number) to a level with optional fade.
+  fields:
+    contractor_number:
+      name: Contractor number
+      required: true
+      example: 1005
+      selector:
+        number:
+          min: 1
+          max: 9999
+          mode: box
+    level:
+      name: Level
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
+    fade:
+      name: Fade
+      description: Ramp time in seconds (0–6553.5, 0.1s steps).
+      selector:
+        number:
+          min: 0
+          max: 6553.5
+          step: 0.1
+          unit_of_measurement: s
+
+press_switch:
+  name: Press keypad switch
+  description: >-
+    Execute a Vantage switch function (VSW) — the same thing a physical
+    keypad button does. Use this to trigger Vantage scenes and macros.
+  fields:
+    master:
+      name: Master
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 15
+          mode: box
+    station:
+      name: Station
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 124
+          mode: box
+    switch:
+      name: Switch
+      description: Button position on the station (1–10).
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 10
+          mode: box
+    action:
+      name: Action
+      description: momentary = press then release; press / release for stateful switches.
+      default: momentary
+      selector:
+        select:
+          options:
+            - momentary
+            - press
+            - release
+    hold_time:
+      name: Hold time
+      description: Seconds between press and release for momentary.
+      default: 0.3
+      selector:
+        number:
+          min: 0.05
+          max: 10
+          step: 0.05
+          unit_of_measurement: s
+
+set_led:
+  name: Set keypad LED
+  description: Set a station button LED off, on, or blinking (VLD).
+  fields:
+    master:
+      name: Master
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 15
+          mode: box
+    station:
+      name: Station
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 124
+          mode: box
+    led:
+      name: LED
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 10
+          mode: box
+    state:
+      name: State
+      required: true
+      selector:
+        select:
+          options:
+            - "off"
+            - "on"
+            - blink
+
+execute_time_function:
+  name: Execute time function
+  description: >-
+    Run one of the controller's internal scheduled functions (VET) in its
+    On or Off state — the Vantage system's own "automations".
+  fields:
+    master:
+      name: Master
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 15
+          mode: box
+    function:
+      name: Function number
+      description: Time function number from the QLink program (1–255).
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 255
+          mode: box
+    state:
+      name: State
+      default: "on"
+      selector:
+        select:
+          options:
+            - "on"
+            - "off"
+
+get_time_function:
+  name: Get time function
+  description: Read a controller time function's schedule parameters (VQT).
+  fields:
+    master:
+      name: Master
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 15
+          mode: box
+    function:
+      name: Function number
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 255
+          mode: box
+
+discover:
+  name: Discover system
+  description: >-
+    Return the discovered topology — masters, modules, stations with
+    names and programmed switches — plus the learned physical-to-
+    contractor load map.
+
+refresh:
+  name: Refresh loads
+  description: Force an immediate poll sweep of all configured loads.
+
+set_push_reporting:
+  name: Set push reporting
+  description: >-
+    Enable or disable the controller's push reporting (VOS switch
+    presses, VOL load changes). These settings persist on the
+    controller's port — disable them before pointing a plain
+    request/response client at the controller.
+  fields:
+    switches:
+      name: Switch presses (VOS)
+      default: true
+      selector:
+        boolean:
+    loads:
+      name: Load changes (VOL)
+      default: true
+      selector:
+        boolean:

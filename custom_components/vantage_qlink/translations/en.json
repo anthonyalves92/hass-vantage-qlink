@@ -1,28 +1,45 @@
 {
   "config": {
-    "abort": {
-      "already_configured": "Device is already configured"
-    },
-    "error": {
-      "cannot_connect": "Failed to connect",
-      "invalid_auth": "Invalid authentication",
-      "unknown": "Unexpected error"
-    },
     "step": {
       "user": {
+        "title": "Vantage QLink controller",
         "data": {
-          "host": "Host",
-          "password": "Password",
-          "username": "Username",
-          "vantage_lights": "Lights",
-          "vantage_covers": "Covers"
+          "host": "Host (QLink IP Enabler address)",
+          "port": "Port",
+          "vantage_lights": "Light contractor numbers (comma-separated)",
+          "vantage_covers": "Cover contractor numbers (comma-separated)"
         }
-      },
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect. The IP Enabler accepts a single TCP client — make sure nothing else (QLink programming software, another bridge) is connected.",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "Device is already configured"
+    }
+  },
+  "options": {
+    "step": {
       "init": {
+        "title": "Vantage QLink options",
         "data": {
-          "vantage_lights": "Lights",
-          "vantage_covers": "Covers"
+          "vantage_lights": "Light contractor numbers (comma-separated)",
+          "vantage_covers": "Cover contractor numbers (comma-separated)",
+          "scan_interval": "Full poll sweep interval (seconds)",
+          "send_gap_ms": "Gap between on-wire commands (ms)",
+          "command_timeout": "Command reply timeout (seconds)",
+          "default_fade": "Default fade for light changes (seconds)",
+          "push_switches": "Push: report keypad presses (VOS)",
+          "push_loads": "Push: report load changes (VOL)"
         }
+      }
+    }
+  },
+  "entity": {
+    "event": {
+      "station_buttons": {
+        "name": "Buttons"
       }
     }
   }

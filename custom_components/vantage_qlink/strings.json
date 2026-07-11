@@ -2,20 +2,45 @@
   "config": {
     "step": {
       "user": {
+        "title": "Vantage QLink controller",
         "data": {
-          "host": "[%key:common::config_flow::data::host%]",
-          "username": "[%key:common::config_flow::data::username%]",
-          "password": "[%key:common::config_flow::data::password%]"
+          "host": "Host (QLink IP Enabler address)",
+          "port": "Port",
+          "vantage_lights": "Light contractor numbers (comma-separated)",
+          "vantage_covers": "Cover contractor numbers (comma-separated)"
         }
       }
     },
     "error": {
-      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
-      "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]",
-      "unknown": "[%key:common::config_flow::error::unknown%]"
+      "cannot_connect": "Cannot connect. The IP Enabler accepts a single TCP client — make sure nothing else (QLink programming software, another bridge) is connected.",
+      "unknown": "Unexpected error"
     },
     "abort": {
-      "already_configured": "[%key:common::config_flow::abort::already_configured_device%]"
+      "already_configured": "Device is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Vantage QLink options",
+        "data": {
+          "vantage_lights": "Light contractor numbers (comma-separated)",
+          "vantage_covers": "Cover contractor numbers (comma-separated)",
+          "scan_interval": "Full poll sweep interval (seconds)",
+          "send_gap_ms": "Gap between on-wire commands (ms)",
+          "command_timeout": "Command reply timeout (seconds)",
+          "default_fade": "Default fade for light changes (seconds)",
+          "push_switches": "Push: report keypad presses (VOS)",
+          "push_loads": "Push: report load changes (VOL)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "event": {
+      "station_buttons": {
+        "name": "Buttons"
+      }
     }
   }
 }

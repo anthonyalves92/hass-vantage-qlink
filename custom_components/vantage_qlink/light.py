@@ -1,22 +1,31 @@
-import math
+"""Light platform for Vantage QLink loads (contractor-number addressed)."""
 
-from homeassistant.components.light import ATTR_BRIGHTNESS, ColorMode, LightEntity
+from __future__ import annotations
+
+import math
+from typing import Any
+
+from homeassistant.components.light import (
+    ATTR_BRIGHTNESS,
+    ATTR_TRANSITION,
+    ColorMode,
+    LightEntity,
+    LightEntityFeature,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import (
-    DeviceInfo,
-    async_entries_for_config_entry,
-    async_get as get_device_registry,
-)
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util.percentage import (
     percentage_to_ranged_value,
     ranged_value_to_percentage,
 )
 
-from .command_client.commands import CommandClient
-from .command_client.load import LoadInterface
-from .const import CONF_LIGHTS, DOMAIN
+from .const import CONF_LIGHTS, DEFAULT_FADE, DOMAIN, OPT_DEFAULT_FADE
+from .coordinator import QLinkCoordinator
+from .hub import QLinkError
 
 BRIGHTNESS_SCALE = (1, 255)
 
@@ -26,105 +35,77 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the light platform."""
+    """Set up the light platform from the configured contractor numbers."""
+    from . import QLinkRuntime, parse_id_list  # avoid circular import
 
-    client: CommandClient = hass.data[DOMAIN][entry.entry_id]
-    current_device_ids = (
-        [item.strip() for item in entry.options.get(CONF_LIGHTS).split(",")]
-        if entry.options.get(CONF_LIGHTS, None) is not None
-        else []
-    )
+    runtime: QLinkRuntime = hass.data[DOMAIN][entry.entry_id]
+    default_fade = entry.options.get(OPT_DEFAULT_FADE, DEFAULT_FADE)
     async_add_entities(
-        QLinkLight(contractor_number=deviceId, client=client)
-        for deviceId in current_device_ids
+        QLinkLight(runtime.coordinator, con, default_fade)
+        for con in parse_id_list(entry.options.get(CONF_LIGHTS))
     )
 
-    # Remove devices no longer present
-    await remove_unlisted_devices(hass, entry, current_device_ids=current_device_ids)
 
+class QLinkLight(CoordinatorEntity[QLinkCoordinator], LightEntity):
+    """A Vantage load exposed as a dimmable light."""
 
-async def remove_unlisted_devices(
-    hass: HomeAssistant, entry: ConfigEntry, current_device_ids: [str]
-):
-    registered_devices = async_entries_for_config_entry(
-        get_device_registry(hass), entry.entry_id
-    )
-    device_registry = get_device_registry(hass)
+    _attr_color_mode = ColorMode.BRIGHTNESS
+    _attr_supported_color_modes = {ColorMode.BRIGHTNESS}
+    _attr_supported_features = LightEntityFeature.TRANSITION
 
-    for device in registered_devices:
-        # Assuming the identifiers tuple contains your service's unique ID
-        device_unique_id = next(iter(device.identifiers))[1]
-        if (
-            device_unique_id.startswith("vantage_light_")
-            and device_unique_id not in current_device_ids
-        ):
-            device_registry.async_remove_device(device.id)
-
-
-class QLinkLight(LightEntity):
-    _level: int = 0
-
-    def __init__(self, contractor_number: int | str, client: CommandClient) -> None:
-        super().__init__()
-        self._contractor_number = (
-            int(contractor_number)
-            if contractor_number.isnumeric()
-            else str(contractor_number)
-        )
-        self._client = LoadInterface(client)
-
-    async def async_update(self):
-        self._level = await self._client.get_level(self._contractor_number)
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={
-                (DOMAIN, f"{self._contractor_number}"),
-            },
-            name=f"Load {self._contractor_number}",
+    def __init__(
+        self, coordinator: QLinkCoordinator, contractor_number: int, default_fade: float
+    ) -> None:
+        super().__init__(coordinator)
+        self._con = contractor_number
+        self._default_fade = default_fade
+        # unique_id and device identifiers are unchanged from 0.0.x so
+        # existing registry entries (names, areas, automations) reattach.
+        self._attr_unique_id = f"vantage_light_{contractor_number}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{contractor_number}")},
+            name=f"Load {contractor_number}",
             manufacturer="Vantage",
             model="Load",
-            serial_number=f"{self._contractor_number}",
+            serial_number=f"{contractor_number}",
         )
 
     @property
-    def unique_id(self) -> str | None:
-        """Return a unique ID."""
-        return f"vantage_light_{self._contractor_number}"
+    def _level(self) -> int:
+        data = self.coordinator.data or {}
+        return int(data.get(self._con, 0))
 
     @property
-    def is_on(self) -> bool | None:
-        """Return whether the light is on, or if multiple all the lights are on."""
+    def available(self) -> bool:
+        return super().available and self.coordinator.hub.connected
+
+    @property
+    def is_on(self) -> bool:
         return self._level > 0
 
     @property
-    def brightness(self) -> int | None:
-        """Return the brightness of this light between 0..255."""
+    def brightness(self) -> int:
         return math.ceil(percentage_to_ranged_value(BRIGHTNESS_SCALE, self._level))
 
-    @property
-    def color_mode(self) -> ColorMode:
-        """Return the color mode of the light."""
-        return ColorMode.BRIGHTNESS
+    async def _async_set_level(self, level: int, fade: float) -> None:
+        try:
+            await self.coordinator.hub.set_load_level(self._con, level, fade)
+        except QLinkError as err:
+            raise HomeAssistantError(
+                f"Failed to set load {self._con} to {level}%: {err}"
+            ) from err
+        self.coordinator.note_write(self._con, level)
+        self.coordinator.apply_level(self._con, level)
 
-    @property
-    def should_poll(self) -> bool:
-        return True
-
-    @property
-    def supported_color_modes(self) -> set[ColorMode] | None:
-        """Flag supported color modes."""
-        return {ColorMode.BRIGHTNESS}
-
-    async def async_turn_on(self, **kwargs) -> None:
-        """Instruct the light to turn on."""
-        self._level = ranged_value_to_percentage(
-            BRIGHTNESS_SCALE, kwargs.get(ATTR_BRIGHTNESS, 255)
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        level = round(
+            ranged_value_to_percentage(
+                BRIGHTNESS_SCALE, kwargs.get(ATTR_BRIGHTNESS, 255)
+            )
         )
-        await self._client.set_level(self._contractor_number, self._level)
+        fade = kwargs.get(ATTR_TRANSITION, self._default_fade)
+        await self._async_set_level(max(level, 1), fade)
 
-    async def async_turn_off(self, **kwargs) -> None:
-        """Instruct the light to turn off."""
-        self._level = 0
-        await self._client.set_level(self._contractor_number, self._level)
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        fade = kwargs.get(ATTR_TRANSITION, self._default_fade)
+        await self._async_set_level(0, fade)

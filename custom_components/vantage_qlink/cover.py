@@ -1,17 +1,24 @@
-import math
+"""Cover platform for Vantage QLink loads driving shades/covers."""
 
-from homeassistant.components.cover import CoverEntity, ATTR_POSITION
+from __future__ import annotations
+
+from typing import Any
+
+from homeassistant.components.cover import (
+    ATTR_POSITION,
+    CoverEntity,
+    CoverEntityFeature,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import (
-    DeviceInfo,
-    async_entries_for_config_entry,
-    async_get as get_device_registry,
-)
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from .command_client.commands import CommandClient
-from .command_client.load import LoadInterface
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
 from .const import CONF_COVERS, DOMAIN
+from .coordinator import QLinkCoordinator
+from .hub import QLinkError
 
 
 async def async_setup_entry(
@@ -19,88 +26,69 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the cover platform."""
+    """Set up the cover platform from the configured contractor numbers."""
+    from . import QLinkRuntime, parse_id_list  # avoid circular import
 
-    client: CommandClient = hass.data[DOMAIN][entry.entry_id]
-    current_device_ids = (
-        [item.strip() for item in entry.options.get(CONF_COVERS).split(",")]
-        if entry.options.get(CONF_COVERS, None) is not None
-        else []
-    )
+    runtime: QLinkRuntime = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
-        QLinkCover(contractor_number=deviceId, client=client)
-        for deviceId in current_device_ids
+        QLinkCover(runtime.coordinator, con)
+        for con in parse_id_list(entry.options.get(CONF_COVERS))
     )
 
-    # Remove devices no longer present
-    await remove_unlisted_devices(hass, entry, current_device_ids=current_device_ids)
 
+class QLinkCover(CoordinatorEntity[QLinkCoordinator], CoverEntity):
+    """A Vantage load exposed as a positional cover."""
 
-async def remove_unlisted_devices(
-    hass: HomeAssistant, entry: ConfigEntry, current_device_ids: [str]
-):
-    registered_devices = async_entries_for_config_entry(
-        get_device_registry(hass), entry.entry_id
+    _attr_supported_features = (
+        CoverEntityFeature.OPEN
+        | CoverEntityFeature.CLOSE
+        | CoverEntityFeature.SET_POSITION
     )
-    device_registry = get_device_registry(hass)
 
-    for device in registered_devices:
-        # Assuming the identifiers tuple contains your service's unique ID
-        device_unique_id = next(iter(device.identifiers))[1]
-        if (
-            device_unique_id.startswith("vantage_cover_")
-            and device_unique_id not in current_device_ids
-        ):
-            device_registry.async_remove_device(device.id)
-
-
-class QLinkCover(CoverEntity):
-    _level: int = 0
-
-    def __init__(self, contractor_number: int | str, client: CommandClient) -> None:
-        super().__init__()
-        self._contractor_number = (
-            int(contractor_number)
-            if contractor_number.isnumeric()
-            else str(contractor_number)
-        )
-        self._client = LoadInterface(client)
-
-    async def async_update(self):
-        self._level = await self._client.get_level(self._contractor_number)
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={
-                (DOMAIN, f"{self._contractor_number}"),
-            },
-            name=f"Load {self._contractor_number}",
+    def __init__(self, coordinator: QLinkCoordinator, contractor_number: int) -> None:
+        super().__init__(coordinator)
+        self._con = contractor_number
+        self._attr_unique_id = f"vantage_cover_{contractor_number}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{contractor_number}")},
+            name=f"Load {contractor_number}",
             manufacturer="Vantage",
             model="Load",
-            serial_number=f"{self._contractor_number}",
+            serial_number=f"{contractor_number}",
         )
 
     @property
-    def unique_id(self) -> str | None:
-        """Return a unique ID."""
-        return f"vantage_cover_{self._contractor_number}"
+    def _level(self) -> int:
+        data = self.coordinator.data or {}
+        return int(data.get(self._con, 0))
 
     @property
-    def is_closed(self) -> bool | None:
-        """Return whether the cover is closed, or open."""
+    def available(self) -> bool:
+        return super().available and self.coordinator.hub.connected
+
+    @property
+    def is_closed(self) -> bool:
         return self._level == 0
 
     @property
-    def current_cover_position(self) -> int | None:
-        """Return the current position of the cover."""
+    def current_cover_position(self) -> int:
         return self._level
 
-    @property
-    def should_poll(self) -> bool:
-        return True
+    async def _async_set_level(self, level: int) -> None:
+        try:
+            await self.coordinator.hub.set_load_level(self._con, level)
+        except QLinkError as err:
+            raise HomeAssistantError(
+                f"Failed to move cover load {self._con} to {level}%: {err}"
+            ) from err
+        self.coordinator.note_write(self._con, level)
+        self.coordinator.apply_level(self._con, level)
 
-    async def async_set_cover_position(self, **kwargs):
-        """Move the cover to a specific position."""
-        self._level = kwargs.get(ATTR_POSITION, 0)
-        await self._client.set_level(self._contractor_number, self._level)
+    async def async_open_cover(self, **kwargs: Any) -> None:
+        await self._async_set_level(100)
+
+    async def async_close_cover(self, **kwargs: Any) -> None:
+        await self._async_set_level(0)
+
+    async def async_set_cover_position(self, **kwargs: Any) -> None:
+        await self._async_set_level(int(kwargs.get(ATTR_POSITION, 0)))

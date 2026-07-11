@@ -1,14 +1,13 @@
 {
   "domain": "vantage_qlink",
   "name": "Vantage QLink",
-  "codeowners": ["@bassrock"],
+  "codeowners": ["@anthonyalves92", "@bassrock"],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://www.home-assistant.io/integrations/vantage_qlink",
-  "homekit": {},
-  "iot_class": "local_polling",
+  "documentation": "https://github.com/anthonyalves92/hass-vantage-qlink",
+  "integration_type": "hub",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/anthonyalves92/hass-vantage-qlink/issues",
   "requirements": [],
-  "ssdp": [],
-  "zeroconf": [],
-  "version": "0.0.1"
+  "version": "1.0.0"
 }

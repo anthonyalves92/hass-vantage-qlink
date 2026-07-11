@@ -1,5 +1,5 @@
 {
-  "name": "hass-vantage-qlink",
+  "name": "Vantage QLink (full capacity)",
   "render_readme": true,
-  "homeassistant": "2021.3.1"
+  "homeassistant": "2024.6.0"
 }
