@@ -92,8 +92,9 @@ class QLinkHub:
         self._push_callbacks: list[Callable[[str, list[str]], None]] = []
         self._connection_callbacks: list[Callable[[bool], None]] = []
 
-        # Rolling log of recent traffic for diagnostics.
-        self.recent_lines: deque[str] = deque(maxlen=100)
+        # Rolling log of recent traffic for diagnostics. Sized so pushes
+        # survive a full poll sweep (2 lines per polled load).
+        self.recent_lines: deque[str] = deque(maxlen=400)
 
     # ------------------------------------------------------------- state
 
@@ -416,11 +417,15 @@ class QLinkHub:
         return (load_id,)
 
     async def get_load_level(self, load_id: int | str) -> int:
-        """VGL# <n> -> RGL <n> <level> (bare <level> tolerated)."""
+        """VGL# <n> -> RGL <n> <level> (bare <level> tolerated).
+
+        Clamped to 0-100: some station-bus loads (LVRS relays) report raw
+        values above 100 for "on".
+        """
         lines = await self.command(
             "VGL", *self._load_args(load_id), prefixes=("RGL",), accept_bare=True
         )
-        return self._tail_int(lines, drop_prefix_args=2)
+        return max(0, min(100, self._tail_int(lines, drop_prefix_args=2)))
 
     async def set_load_level(
         self, load_id: int | str, level: int, fade: float = 0.0

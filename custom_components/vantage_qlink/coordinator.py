@@ -129,7 +129,9 @@ class QLinkCoordinator(DataUpdateCoordinator[dict[int | str, int]]):
             self.apply_level(con, level)
             return
 
-        # Attribute to a recent HA write when unambiguous.
+        # Attribute to a recent HA write when unambiguous — but only as a
+        # mapping *candidate*: a coincidental keypad press at the same
+        # level within the window must not create a permanent wrong map.
         now = time.monotonic()
         matches = [
             w
@@ -137,9 +139,12 @@ class QLinkCoordinator(DataUpdateCoordinator[dict[int | str, int]]):
             if w[1] == level and now - w[2] < WRITE_MATCH_WINDOW
         ]
         if len(matches) == 1:
-            self._learn(phys_key, matches[0][0], source="write-echo")
-            self.apply_level(matches[0][0], level)
-            return
+            cands = self._candidates.setdefault(phys_key, {})
+            cands[matches[0][0]] = cands.get(matches[0][0], 0) + 1
+            if cands[matches[0][0]] >= CONFIRMATIONS_REQUIRED:
+                self._learn(phys_key, matches[0][0], source="write-echo")
+                self.apply_level(matches[0][0], level)
+                return
 
         self._observations = [
             o for o in self._observations if now - o.ts < OBSERVATION_TTL
