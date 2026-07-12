@@ -73,6 +73,10 @@ class QLinkCoordinator(DataUpdateCoordinator[dict[int | str, int]]):
             hass, STORAGE_VERSION, f"{DOMAIN}.{entry_id}.load_map"
         )
         self.load_map: dict[str, int] = {}  # "m-e-mod-l" -> contractor number
+        # Levels written (optimistic or push) since they were last confirmed
+        # by a poll read: load id -> (level, monotonic ts). Used to keep a
+        # slow sweep from clobbering fresher state it started before.
+        self._fresh: dict[int | str, tuple[int, float]] = {}
         self._candidates: dict[str, dict[int, int]] = {}
         self._observations: list[_Observation] = []
         self._recent_writes: list[tuple[int, int, float]] = []  # (con, level, ts)
@@ -100,13 +104,23 @@ class QLinkCoordinator(DataUpdateCoordinator[dict[int | str, int]]):
     async def _async_update_data(self) -> dict[int, int]:
         old = dict(self.data) if self.data else {}
         levels: dict[int | str, int] = {}
+        read_ts: dict[int | str, float] = {}
         try:
             for con in self.loads:
-                levels[con] = await self.hub.get_load_level(con)
+                levels[con] = await self.hub.get_load_level(con, low_priority=True)
+                read_ts[con] = time.monotonic()
         except QLinkConnectionError as err:
             raise UpdateFailed(f"Controller connection lost: {err}") from err
         except QLinkError as err:
             raise UpdateFailed(f"Sweep failed: {err}") from err
+
+        # A sweep takes many seconds; never let a level it read early
+        # overwrite a write that landed later (dashboard tap mid-sweep).
+        for con, (lvl, ts) in list(self._fresh.items()):
+            if ts > read_ts.get(con, 0.0):
+                levels[con] = lvl
+            else:
+                del self._fresh[con]  # poll read after the write; confirmed
 
         if old:
             self._reconcile_observations(old, levels)
@@ -154,9 +168,10 @@ class QLinkCoordinator(DataUpdateCoordinator[dict[int | str, int]]):
 
     def apply_level(self, contractor_number: int | str, level: int) -> None:
         """Fold a known level into coordinator data and notify entities."""
-        data = dict(self.data) if self.data else {}
         if contractor_number not in self.loads:
             return
+        self._fresh[contractor_number] = (level, time.monotonic())
+        data = dict(self.data) if self.data else {}
         data[contractor_number] = level
         self.async_set_updated_data(data)
 

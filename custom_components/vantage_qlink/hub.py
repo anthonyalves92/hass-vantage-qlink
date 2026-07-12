@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+from itertools import count
 from collections.abc import Callable
 from dataclasses import dataclass, field
 import logging
@@ -83,7 +84,11 @@ class QLinkHub:
         self._reader_task: asyncio.Task | None = None
         self._sender_task: asyncio.Task | None = None
         self._reconnect_task: asyncio.Task | None = None
-        self._queue: asyncio.Queue[_Request] = asyncio.Queue()
+        # Priority queue: user commands (0) preempt poll reads (1).
+        self._queue: asyncio.PriorityQueue[tuple[int, int, _Request]] = (
+            asyncio.PriorityQueue()
+        )
+        self._seq = count()
         self._in_flight: _Request | None = None
         self._last_send = 0.0
         self._closing = False
@@ -198,7 +203,7 @@ class QLinkHub:
         self._in_flight = None
         while not self._queue.empty():
             try:
-                req = self._queue.get_nowait()
+                _, _, req = self._queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
             if not req.future.done():
@@ -236,6 +241,7 @@ class QLinkHub:
         detailed: bool = True,
         timeout: float | None = None,
         multiline_count_index: int | None = None,
+        low_priority: bool = False,
     ) -> list[str]:
         """Send a command and return its reply line(s), tokenized joined.
 
@@ -260,12 +266,12 @@ class QLinkHub:
             timeout=timeout or self.command_timeout,
             multiline_count_index=multiline_count_index,
         )
-        await self._queue.put(req)
+        await self._queue.put((1 if low_priority else 0, next(self._seq), req))
         return await req.future
 
     async def _send_loop(self) -> None:
         while True:
-            req = await self._queue.get()
+            _, _, req = await self._queue.get()
             if req.future.done():
                 continue
             if self._writer is None or not self._connected:
@@ -416,14 +422,21 @@ class QLinkHub:
             return tuple(load_id.split("-"))
         return (load_id,)
 
-    async def get_load_level(self, load_id: int | str) -> int:
+    async def get_load_level(
+        self, load_id: int | str, *, low_priority: bool = False
+    ) -> int:
         """VGL# <n> -> RGL <n> <level> (bare <level> tolerated).
 
         Clamped to 0-100: some station-bus loads (LVRS relays) report raw
-        values above 100 for "on".
+        values above 100 for "on". Poll sweeps pass low_priority so user
+        commands jump the queue.
         """
         lines = await self.command(
-            "VGL", *self._load_args(load_id), prefixes=("RGL",), accept_bare=True
+            "VGL",
+            *self._load_args(load_id),
+            prefixes=("RGL",),
+            accept_bare=True,
+            low_priority=low_priority,
         )
         return max(0, min(100, self._tail_int(lines, drop_prefix_args=2)))
 
@@ -580,5 +593,5 @@ class QLinkHub:
             accept_bare=True,
             timeout=timeout or self.command_timeout,
         )
-        await self._queue.put(req)
+        await self._queue.put((0, next(self._seq), req))
         return await req.future
