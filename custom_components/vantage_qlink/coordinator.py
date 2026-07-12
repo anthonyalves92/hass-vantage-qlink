@@ -105,14 +105,22 @@ class QLinkCoordinator(DataUpdateCoordinator[dict[int | str, int]]):
         old = dict(self.data) if self.data else {}
         levels: dict[int | str, int] = {}
         read_ts: dict[int | str, float] = {}
-        try:
-            for con in self.loads:
+        failures = 0
+        for con in self.loads:
+            try:
                 levels[con] = await self.hub.get_load_level(con, low_priority=True)
                 read_ts[con] = time.monotonic()
-        except QLinkConnectionError as err:
-            raise UpdateFailed(f"Controller connection lost: {err}") from err
-        except QLinkError as err:
-            raise UpdateFailed(f"Sweep failed: {err}") from err
+            except QLinkConnectionError as err:
+                raise UpdateFailed(f"Controller connection lost: {err}") from err
+            except QLinkError as err:
+                # One bad load (error 257, timeout) must not fail the whole
+                # sweep; keep its last known level and move on.
+                failures += 1
+                if con in old:
+                    levels[con] = old[con]
+                _LOGGER.debug("Poll failed for load %s: %s", con, err)
+        if failures and failures >= len(self.loads):
+            raise UpdateFailed("Every load poll failed this sweep")
 
         # A sweep takes many seconds; never let a level it read early
         # overwrite a write that landed later (dashboard tap mid-sweep).

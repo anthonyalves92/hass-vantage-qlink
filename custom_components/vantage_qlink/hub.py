@@ -412,38 +412,56 @@ class QLinkHub:
             raise QLinkError(f"Unparseable reply: {lines[0]}") from err
 
     @staticmethod
-    def _load_args(load_id: int | str) -> tuple[Any, ...]:
-        """A load id is a contractor number or a dash-form station address.
+    def _station_load_args(load_id: str) -> tuple[str, ...]:
+        """Split a dash-form station-bus address ("2-33-8" -> m, s, load)."""
+        return tuple(load_id.split("-"))
 
-        ``"2-33-8"`` becomes three positional args (master station load),
-        matching how 0.0.x addressed station-bus loads.
+    @staticmethod
+    def _is_station_load(load_id: int | str) -> bool:
+        """Dash-form ids address loads on the station bus (LVRS/wall-box).
+
+        These use VGC/VLC (master station load), not the contractor-number
+        commands — VGL on a station address returns error 257.
         """
-        if isinstance(load_id, str) and "-" in load_id:
-            return tuple(load_id.split("-"))
-        return (load_id,)
+        return isinstance(load_id, str) and "-" in load_id
+
+    def _parse_level(self, lines: list[str], load_id: int | str) -> int:
+        value = self._tail_int(lines, drop_prefix_args=2)
+        if value == 257:
+            # The controller's generic error response.
+            raise QLinkError(f"Controller error 257 for load {load_id}")
+        return max(0, min(100, value))
 
     async def get_load_level(
         self, load_id: int | str, *, low_priority: bool = False
     ) -> int:
-        """VGL# <n> -> RGL <n> <level> (bare <level> tolerated).
+        """Read a load level: VGC# for station-bus loads, VGL# otherwise.
 
-        Clamped to 0-100: some station-bus loads (LVRS relays) report raw
-        values above 100 for "on". Poll sweeps pass low_priority so user
-        commands jump the queue.
+        Clamped to 0-100. Poll sweeps pass low_priority so user commands
+        jump the queue.
         """
-        lines = await self.command(
-            "VGL",
-            *self._load_args(load_id),
-            prefixes=("RGL",),
-            accept_bare=True,
-            low_priority=low_priority,
-        )
-        return max(0, min(100, self._tail_int(lines, drop_prefix_args=2)))
+        if self._is_station_load(load_id):
+            lines = await self.command(
+                "VGC",
+                *self._station_load_args(load_id),
+                prefixes=("RGC",),
+                accept_bare=True,
+                low_priority=low_priority,
+            )
+        else:
+            lines = await self.command(
+                "VGL",
+                load_id,
+                prefixes=("RGL",),
+                accept_bare=True,
+                low_priority=low_priority,
+            )
+        return self._parse_level(lines, load_id)
 
     async def set_load_level(
         self, load_id: int | str, level: int, fade: float = 0.0
     ) -> None:
-        """VLO# <n> <level> <fade> -> RLO <n> <level> <fade>.
+        """Set a load level: VLC# for station-bus loads, VLO# otherwise.
 
         Whole-second fades MUST be sent as integers: this firmware
         misparses a trailing ".0" (e.g. "3.0") as a vastly longer fade,
@@ -451,9 +469,21 @@ class QLinkHub:
         Verified live: "VLO# n 100 3.0" dim-crawls, "VLO# n 100 3" ramps
         correctly. Fractional fades keep one decimal per the protocol
         reference ("2.3").
+
+        Station-bus loads are sent without a fade — they are LVRS relay /
+        0-10V channels where a fade is meaningless at best.
         """
         level = max(0, min(100, int(level)))
-        args: tuple[Any, ...] = (*self._load_args(load_id), level)
+        if self._is_station_load(load_id):
+            await self.command(
+                "VLC",
+                *self._station_load_args(load_id),
+                level,
+                prefixes=("RLC",),
+                accept_bare=True,
+            )
+            return
+        args: tuple[Any, ...] = (load_id, level)
         if fade:
             fade_val = round(float(fade), 1)
             args += (int(fade_val) if fade_val == int(fade_val) else fade_val,)
