@@ -68,7 +68,12 @@ from .panel import async_remove_panel_if_last, async_setup_panel
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.LIGHT, Platform.COVER, Platform.EVENT]
+PLATFORMS: list[Platform] = [
+    Platform.LIGHT,
+    Platform.COVER,
+    Platform.EVENT,
+    Platform.SWITCH,
+]
 
 LED_STATES = {"off": 0, "on": 1, "blink": 2}
 
@@ -531,6 +536,9 @@ def _register_services(hass: HomeAssistant) -> None:
         runtime.project = project
         if runtime.project_store is not None:
             await runtime.project_store.async_save(project)
+        # New project data can add platforms' entities (schedule switches);
+        # reload the entry so they materialize without a restart.
+        hass.config_entries.async_schedule_reload(runtime.entry.entry_id)
         return {
             "loads_mapped": len(load_map),
             "total_map_entries": total,
