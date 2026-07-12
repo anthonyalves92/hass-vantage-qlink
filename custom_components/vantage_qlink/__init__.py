@@ -61,6 +61,7 @@ from .const import (
 )
 from .coordinator import QLinkCoordinator
 from .hub import QLinkError, QLinkHub
+from .panel import async_remove_panel_if_last, async_setup_panel
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -145,6 +146,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     runtime = QLinkRuntime(hub, coordinator, entry)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = runtime
+
+    # Sidebar console panel (registered once, shared across entries).
+    await async_setup_panel(hass)
 
     _wire_push_handlers(hass, runtime)
     # Hub callbacks fire from within the event loop (reader task).
@@ -367,6 +371,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if runtime:
             await runtime.coordinator.async_shutdown()
             await runtime.hub.async_disconnect()
+        async_remove_panel_if_last(hass)
     return unload_ok
 
 
@@ -390,7 +395,11 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 def _get_runtime(hass: HomeAssistant, call: ServiceCall) -> QLinkRuntime:
-    domain_data: dict[str, QLinkRuntime] = hass.data.get(DOMAIN, {})
+    domain_data = {
+        k: v
+        for k, v in hass.data.get(DOMAIN, {}).items()
+        if not k.startswith("_")
+    }
     if not domain_data:
         raise HomeAssistantError("No Vantage QLink entry is set up")
     entry_id = call.data.get("entry_id")

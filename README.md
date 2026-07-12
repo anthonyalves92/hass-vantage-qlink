@@ -50,6 +50,13 @@ A companion Node.js debug bridge / web console for the same protocol lives at
 - **Options** (Settings → Devices & Services → Vantage QLink → Configure):
   load lists, sweep interval, send gap, command timeout, default fade, and
   push toggles.
+- **Sidebar console** — a "Vantage QLink" panel (admin-only) equivalent to
+  the standalone vantage-qlink-api web UI, but riding the integration's own
+  connection so it never competes for the IP Enabler's single TCP slot:
+  raw command console with the full 40-command reference (click to fill,
+  `#` detailed-mode toggle), live TX/RX traffic tail, connection/push
+  status, and a browser for the discovered system (stations with names,
+  rooms, types, programmed buttons).
 
 ## Compatibility with 0.0.x
 
