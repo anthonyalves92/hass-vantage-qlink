@@ -443,11 +443,20 @@ class QLinkHub:
     async def set_load_level(
         self, load_id: int | str, level: int, fade: float = 0.0
     ) -> None:
-        """VLO# <n> <level> <fade> -> RLO <n> <level> <fade>."""
+        """VLO# <n> <level> <fade> -> RLO <n> <level> <fade>.
+
+        Whole-second fades MUST be sent as integers: this firmware
+        misparses a trailing ".0" (e.g. "3.0") as a vastly longer fade,
+        leaving the load crawling toward its target for minutes.
+        Verified live: "VLO# n 100 3.0" dim-crawls, "VLO# n 100 3" ramps
+        correctly. Fractional fades keep one decimal per the protocol
+        reference ("2.3").
+        """
         level = max(0, min(100, int(level)))
         args: tuple[Any, ...] = (*self._load_args(load_id), level)
         if fade:
-            args += (round(float(fade), 1),)
+            fade_val = round(float(fade), 1)
+            args += (int(fade_val) if fade_val == int(fade_val) else fade_val,)
         await self.command("VLO", *args, prefixes=("RLO",), accept_bare=True)
 
     async def get_switch_state(self, master: int, station: int, switch: int) -> int:
