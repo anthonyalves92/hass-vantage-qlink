@@ -44,9 +44,12 @@ async def async_setup_entry(
         _LOGGER.debug("No project imported; no schedule switches created")
         return
     async_add_entities(
-        QLinkScheduleSwitch(runtime.hub, tc)
-        for tc in time_controls
-        if tc.get("number") and tc.get("master")
+        (
+            QLinkScheduleSwitch(runtime.hub, tc)
+            for tc in time_controls
+            if tc.get("number") and tc.get("master")
+        ),
+        update_before_add=True,
     )
 
 
