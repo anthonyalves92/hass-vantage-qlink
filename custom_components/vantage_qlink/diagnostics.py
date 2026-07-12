@@ -35,5 +35,12 @@ async def async_get_config_entry_diagnostics(
             "learned_physical_map": coordinator.load_map,
         },
         "discovery": runtime.discovery,
+        "project": {
+            "imported": bool(runtime.project),
+            "loads": len(runtime.project.get("loads", [])),
+            "load_map_entries": len(runtime.project.get("load_map", {})),
+            "time_controls": runtime.project.get("time_controls", []),
+            "variables": runtime.project.get("variables", []),
+        },
         "recent_traffic": list(hub.recent_lines),
     }

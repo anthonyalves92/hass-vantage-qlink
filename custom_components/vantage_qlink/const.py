@@ -45,6 +45,7 @@ SERVICE_GET_TIME_FUNCTION = "get_time_function"
 SERVICE_DISCOVER = "discover"
 SERVICE_REFRESH = "refresh"
 SERVICE_SET_PUSH_REPORTING = "set_push_reporting"
+SERVICE_IMPORT_PROJECT = "import_project"
 
 # Station types per the QLink protocol reference (VQS).
 STATION_TYPES = {

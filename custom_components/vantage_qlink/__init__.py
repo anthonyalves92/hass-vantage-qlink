@@ -9,6 +9,7 @@ switch functions, LEDs, and controller time functions.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Any
 
@@ -25,6 +26,7 @@ from homeassistant.core import (
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.storage import Store
 
 from .const import (
     CONF_COVERS,
@@ -55,6 +57,7 @@ from .const import (
     SERVICE_SEND_COMMAND,
     SERVICE_SET_LED,
     SERVICE_SET_LOAD_LEVEL,
+    SERVICE_IMPORT_PROJECT,
     SERVICE_SET_PUSH_REPORTING,
     SIGNAL_NEW_STATION,
     STATION_TYPES,
@@ -110,6 +113,8 @@ class QLinkRuntime:
         self.entry = entry
         self.discovery: dict[str, Any] = {}
         self.known_stations: dict[str, dict[str, Any]] = {}
+        self.project: dict[str, Any] = {}
+        self.project_store: Store[dict[str, Any]] | None = None
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -145,6 +150,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_load_map()
 
     runtime = QLinkRuntime(hub, coordinator, entry)
+    runtime.project_store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}.project")
+    stored_project = await runtime.project_store.async_load()
+    if stored_project:
+        runtime.project = stored_project
+        project_map = {
+            str(k): int(v)
+            for k, v in (stored_project.get("load_map") or {}).items()
+        }
+        if project_map:
+            coordinator.load_map.update(project_map)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = runtime
 
     # Sidebar console panel (registered once, shared across entries).
@@ -498,6 +513,34 @@ def _register_services(hass: HomeAssistant) -> None:
         runtime = _get_runtime(hass, call)
         await runtime.coordinator.async_request_refresh()
 
+    async def import_project(call: ServiceCall) -> ServiceResponse:
+        runtime = _get_runtime(hass, call)
+        raw = call.data["project"]
+        try:
+            project = json.loads(raw) if isinstance(raw, str) else dict(raw)
+        except (json.JSONDecodeError, TypeError) as err:
+            raise HomeAssistantError(f"Invalid project JSON: {err}") from err
+        load_map = {
+            str(k): int(v)
+            for k, v in (project.get("load_map") or {}).items()
+            if str(v).lstrip("-").isdigit()
+        }
+        if not load_map:
+            raise HomeAssistantError("Project contains no load_map")
+        total = await runtime.coordinator.async_apply_project_map(load_map)
+        runtime.project = project
+        if runtime.project_store is not None:
+            await runtime.project_store.async_save(project)
+        return {
+            "loads_mapped": len(load_map),
+            "total_map_entries": total,
+            "loads": len(project.get("loads", [])),
+            "stations": len(project.get("stations", [])),
+            "lv_stations": len(project.get("lv_stations", [])),
+            "time_controls": len(project.get("time_controls", [])),
+            "variables": len(project.get("variables", [])),
+        }
+
     async def set_push_reporting(call: ServiceCall) -> None:
         runtime = _get_runtime(hass, call)
         try:
@@ -619,6 +662,15 @@ def _register_services(hass: HomeAssistant) -> None:
     )
     hass.services.async_register(
         DOMAIN, SERVICE_REFRESH, refresh, schema=vol.Schema({**entry_opt})
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_IMPORT_PROJECT,
+        import_project,
+        schema=vol.Schema(
+            {vol.Required("project"): vol.Any(cv.string, dict), **entry_opt}
+        ),
+        supports_response=SupportsResponse.OPTIONAL,
     )
     hass.services.async_register(
         DOMAIN,

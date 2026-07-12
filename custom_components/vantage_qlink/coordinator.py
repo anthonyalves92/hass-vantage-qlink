@@ -99,6 +99,16 @@ class QLinkCoordinator(DataUpdateCoordinator[dict[int | str, int]]):
     async def _save_map(self) -> None:
         await self._store.async_save({"map": self.load_map})
 
+    async def async_apply_project_map(self, load_map: dict[str, int]) -> int:
+        """Merge an authoritative physical->contractor map from a .qlk
+        project import. Project entries win over learned ones."""
+        self.load_map.update(load_map)
+        self._candidates.clear()
+        self._observations.clear()
+        await self._save_map()
+        _LOGGER.info("Applied project load map: %d entries", len(load_map))
+        return len(self.load_map)
+
     # ------------------------------------------------------------ polling
 
     async def _async_update_data(self) -> dict[int, int]:

@@ -225,3 +225,19 @@ set_push_reporting:
       default: true
       selector:
         boolean:
+
+import_project:
+  name: Import QLink project
+  description: >-
+    Import a parsed .qlk project (JSON) — installs the complete
+    physical-to-contractor load map so every VOL push updates its entity
+    instantly, and stores load names, relay stations, schedules, and
+    variables for diagnostics.
+  fields:
+    project:
+      name: Project JSON
+      description: Parsed project as JSON text (from the qlk parser).
+      required: true
+      selector:
+        text:
+          multiline: true
