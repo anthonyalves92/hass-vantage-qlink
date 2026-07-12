@@ -48,8 +48,8 @@ A companion Node.js debug bridge / web console for the same protocol lives at
   | `vantage_qlink.set_push_reporting` | `VOS/VOL` | Toggle controller push reporting |
 
 - **Options** (Settings → Devices & Services → Vantage QLink → Configure):
-  load lists, sweep interval, send gap, command timeout, default fade, and
-  push toggles.
+  load lists, sweep interval, send gap, command timeout, default fade (3 s out of the box,
+  matching typical keypad scene ramps; set 0 for instant), and push toggles.
 - **Sidebar console** — a "Vantage QLink" panel (admin-only) equivalent to
   the standalone vantage-qlink-api web UI, but riding the integration's own
   connection so it never competes for the IP Enabler's single TCP slot:

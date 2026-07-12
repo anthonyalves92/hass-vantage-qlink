@@ -18,7 +18,10 @@ OPT_PUSH_LOADS = "push_loads"  # VOL
 DEFAULT_SCAN_INTERVAL = 60  # seconds between full VGL sweeps
 DEFAULT_SEND_GAP_MS = 120  # pacing between on-wire commands
 DEFAULT_COMMAND_TIMEOUT = 4.0
-DEFAULT_FADE = 0.0
+# Matches the ramp Vantage keypad scenes use, per side-by-side comparison
+# against a keypad press on real hardware. Override per-call with
+# light.turn_on's `transition`, or per-install in the options flow.
+DEFAULT_FADE = 3.0
 DEFAULT_PUSH_SWITCHES = True
 DEFAULT_PUSH_LOADS = True
 
