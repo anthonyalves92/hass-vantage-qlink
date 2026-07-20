@@ -42,5 +42,14 @@
         "name": "Buttons"
       }
     }
+  },
+  "device_automation": {
+    "trigger_type": {
+      "pressed": "{subtype} pressed",
+      "released": "{subtype} released"
+    },
+    "action_type": {
+      "set_led": "Set button LED"
+    }
   }
 }

@@ -18,7 +18,12 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, SIGNAL_NEW_STATION
+from .const import (
+    DOMAIN,
+    SIGNAL_NEW_STATION,
+    station_device_identifier,
+    station_display_name,
+)
 
 EVENT_TYPES = ["pressed", "released"]
 
@@ -38,7 +43,7 @@ async def async_setup_entry(
         key = f"{master}-{station}"
         if key in entities:
             return entities[key]
-        info = runtime.known_stations.get(key, {})
+        info = runtime.stations.get(key) or runtime.known_stations.get(key, {})
         entity = QLinkStationEvent(entry.entry_id, master, station, info)
         entities[key] = entity
         async_add_entities([entity])
@@ -60,9 +65,12 @@ async def async_setup_entry(
         )
     )
 
-    # Stations already discovered before this platform loaded.
-    for info in list(runtime.known_stations.values()):
-        _ensure_station(info["master"], info["station"])
+    # Stations known before this platform loaded: imported project stations
+    # (present at setup) plus anything discovery already found.
+    for info in list(runtime.stations.values()) + list(
+        runtime.known_stations.values()
+    ):
+        _ensure_station(int(info["master"]), int(info["station"]))
 
 
 class QLinkStationEvent(EventEntity):
@@ -78,23 +86,29 @@ class QLinkStationEvent(EventEntity):
     ) -> None:
         self._master = master
         self._station = station
+        # unique_id unchanged from earlier versions so existing entities
+        # (and the automations bound to them) reattach without migration.
         self._attr_unique_id = f"vantage_station_{master}_{station}"
 
-        raw_name = (info.get("name") or "").split("|")[0].strip()
-        station_label = raw_name or f"Station {master}-{station}"
-        model = info.get("type_name") or "Keypad Station"
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"station_{master}_{station}")},
-            name=f"Vantage {station_label}",
+            identifiers={station_device_identifier(master, station)},
+            name=station_display_name(info, master, station),
             manufacturer="Vantage",
-            model=model,
+            model=info.get("type_name") or "Keypad Station",
             serial_number=str(info.get("serial", "")) or None,
+            suggested_area=info.get("room") or None,
         )
-        self._attr_extra_state_attributes = {
+        attributes: dict[str, Any] = {
             "master": master,
             "station": station,
             "programmed_switches": info.get("programmed_switches", []),
         }
+        # Surface per-button labels when the imported project supplies them,
+        # so the button numbers on the entity carry their friendly names.
+        buttons = info.get("buttons")
+        if buttons:
+            attributes["buttons"] = buttons
+        self._attr_extra_state_attributes = attributes
 
     @callback
     def handle_press(self, payload: dict[str, Any]) -> None:

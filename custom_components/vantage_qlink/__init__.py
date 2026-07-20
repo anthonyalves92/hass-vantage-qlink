@@ -25,6 +25,7 @@ from homeassistant.core import (
 )
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 import homeassistant.helpers.config_validation as cv
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.storage import Store
 
@@ -43,6 +44,7 @@ from .const import (
     EVENT_IR,
     EVENT_LED_CHANGED,
     EVENT_LOAD_CHANGED,
+    LED_STATES,
     OPT_COMMAND_TIMEOUT,
     OPT_DEFAULT_FADE,
     OPT_PUSH_LOADS,
@@ -61,6 +63,9 @@ from .const import (
     SERVICE_SET_PUSH_REPORTING,
     SIGNAL_NEW_STATION,
     STATION_TYPES,
+    station_device_identifier,
+    station_display_name,
+    station_from_identifiers,
 )
 from .coordinator import QLinkCoordinator
 from .hub import QLinkError, QLinkHub
@@ -74,8 +79,6 @@ PLATFORMS: list[Platform] = [
     Platform.EVENT,
     Platform.SWITCH,
 ]
-
-LED_STATES = {"off": 0, "on": 1, "blink": 2}
 
 
 def parse_id_list(raw: Any) -> list[int | str]:
@@ -118,8 +121,65 @@ class QLinkRuntime:
         self.entry = entry
         self.discovery: dict[str, Any] = {}
         self.known_stations: dict[str, dict[str, Any]] = {}
+        # Unified station index (key "{master}-{station}"), project data
+        # merged over live discovery — the single source consumed by the
+        # event entity, device triggers, and the device action.
+        self.stations: dict[str, dict[str, Any]] = {}
         self.project: dict[str, Any] = {}
         self.project_store: Store[dict[str, Any]] | None = None
+
+
+def _build_stations_index(runtime: "QLinkRuntime") -> None:
+    """Merge imported project stations over live discovery.
+
+    Everything except ``master``/``station`` is optional and read
+    defensively, so an older project (or none at all) still yields a
+    usable index built purely from discovery.
+    """
+    index: dict[str, dict[str, Any]] = {}
+    for key, info in runtime.known_stations.items():
+        index[key] = dict(info)
+    for st in runtime.project.get("stations") or []:
+        master = st.get("master")
+        station = st.get("station")
+        if master is None or station is None:
+            continue
+        key = f"{int(master)}-{int(station)}"
+        merged = dict(index.get(key, {}))
+        merged.update({k: v for k, v in st.items() if v is not None})
+        merged["master"] = int(master)
+        merged["station"] = int(station)
+        index[key] = merged
+    runtime.stations = index
+
+
+def _register_station_devices(
+    hass: HomeAssistant, entry: ConfigEntry, stations: dict[str, dict[str, Any]]
+) -> None:
+    """Pre-create one device per station so it exists before any press.
+
+    Idempotent ``async_get_or_create`` on the back-compat identifier, so an
+    existing install reattaches to the same device (user areas, names, and
+    automations survive). ``suggested_area`` only fills an *unset* area.
+    """
+    dev_reg = dr.async_get(hass)
+    for info in stations.values():
+        master = info.get("master")
+        station = info.get("station")
+        if master is None or station is None:
+            continue
+        master = int(master)
+        station = int(station)
+        room = info.get("room")
+        dev_reg.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={station_device_identifier(master, station)},
+            manufacturer="Vantage",
+            name=station_display_name(info, master, station),
+            model=info.get("type_name") or "Keypad Station",
+            serial_number=str(info.get("serial", "")) or None,
+            suggested_area=room or None,
+        )
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -166,6 +226,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if project_map:
             coordinator.load_map.update(project_map)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = runtime
+
+    # Build the station index and pre-create a device per project station
+    # *before* forwarding platforms, so the event entity merges into the
+    # existing device instead of racing it (and stations imported from a
+    # project appear immediately, not only after the first keypad press).
+    _build_stations_index(runtime)
+    _register_station_devices(hass, entry, runtime.stations)
 
     # Sidebar console panel (registered once, shared across entries).
     await async_setup_panel(hass)
@@ -366,6 +433,11 @@ async def _async_discover(hass: HomeAssistant, runtime: QLinkRuntime) -> None:
                 )
 
         runtime.discovery = discovery
+        # Rebuild the merged index now that discovery has populated
+        # known_stations, then register devices for any live station the
+        # project didn't import (idempotent for project stations).
+        _build_stations_index(runtime)
+        _register_station_devices(hass, runtime.entry, runtime.stations)
         _LOGGER.info(
             "QLink discovery: %d master(s), %d module(s), %d station(s)",
             len(discovery["masters"]),
@@ -409,6 +481,27 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         _LOGGER.debug("Could not disable push reporting during removal")
     finally:
         await hub.async_disconnect()
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    device_entry: dr.DeviceEntry,
+) -> bool:
+    """Allow deleting a station device once it's gone from project+discovery.
+
+    Only orphaned keypad *station* devices may be pruned from the UI; the
+    shared light/cover/schedule devices are never removable this way.
+    """
+    station = station_from_identifiers(device_entry.identifiers)
+    if station is None:
+        return False
+    runtime: QLinkRuntime | None = hass.data.get(DOMAIN, {}).get(
+        config_entry.entry_id
+    )
+    if runtime is None:
+        return True
+    return f"{station[0]}-{station[1]}" not in runtime.stations
 
 
 # --------------------------------------------------------------- services

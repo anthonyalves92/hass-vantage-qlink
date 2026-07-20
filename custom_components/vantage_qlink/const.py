@@ -35,6 +35,63 @@ EVENT_ALL_LOADS = f"{DOMAIN}_all_loads"
 # Dispatcher signals (suffixed with entry_id at runtime).
 SIGNAL_NEW_STATION = f"{DOMAIN}_new_station"
 
+# Keypad LED states for VLD (`set_led` service + device action).
+LED_STATES = {"off": 0, "on": 1, "blink": 2}
+
+# Device-automation constants.
+# Device-trigger types map to the `action` field of the EVENT_BUTTON payload.
+TRIGGER_TYPES = {"pressed", "released"}
+# Device-action type exposing `set_led` on a station device.
+ACTION_SET_LED = "set_led"
+# `subtype` carries the dynamic, project-supplied button label — never
+# translated (so no house-specific labels are shipped in the repo).
+CONF_SUBTYPE = "subtype"
+
+# Payload / config keys shared by the bus event, device triggers, and action.
+ATTR_MASTER = "master"
+ATTR_STATION = "station"
+ATTR_BUTTON = "button"
+ATTR_LED = "led"
+ATTR_STATE = "state"
+
+
+def station_device_identifier(master: int, station: int) -> tuple[str, str]:
+    """Return the device-registry identifier for a keypad station.
+
+    Single source of truth: the event entity, the pre-registered device,
+    the device triggers, and the device action all key off this exact
+    tuple so an imported project reattaches to the same device an existing
+    install already has.
+    """
+    return (DOMAIN, f"station_{master}_{station}")
+
+
+def station_display_name(info: dict, master: int, station: int) -> str:
+    """Human name for a station device, from project or discovery data.
+
+    Discovery names arrive as the raw ``Name|Room|Floor|Type`` string;
+    project names are already clean. Both collapse to the same
+    ``Vantage <label>`` form so the pre-created device and the event
+    entity never disagree (which would otherwise churn the device name).
+    """
+    label = (info.get("name") or "").split("|")[0].strip()
+    return f"Vantage {label or f'Station {master}-{station}'}"
+
+
+def station_from_identifiers(
+    identifiers: set[tuple[str, str]],
+) -> tuple[int, int] | None:
+    """Reverse of :func:`station_device_identifier`: pull ``(m, s)`` out."""
+    for domain, ident in identifiers:
+        if domain != DOMAIN:
+            continue
+        if not ident.startswith("station_"):
+            continue
+        parts = ident[len("station_"):].split("_")
+        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+            return int(parts[0]), int(parts[1])
+    return None
+
 # Services.
 SERVICE_SEND_COMMAND = "send_command"
 SERVICE_SET_LOAD_LEVEL = "set_load_level"

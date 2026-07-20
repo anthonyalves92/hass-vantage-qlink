@@ -97,6 +97,66 @@ trigger:
 codes, `vantage_qlink_led_changed` on LED reports (if `VOD` is enabled
 out-of-band), and `vantage_qlink_all_loads` on system-wide ALL ON / ALL OFF.
 
+## Keypad stations as devices
+
+Every physical keypad **station** is registered as its own Home Assistant
+**device** (identifier `station_<master>_<station>`), grouping that
+station's button `event` entity, with a name, model, and area suggestion.
+Devices for stations listed in an imported project are created at startup;
+un-imported stations get a device from live discovery a few seconds after
+boot. Existing installs reattach to the same devices (areas, custom names,
+and automations survive) — the device identifier and the event entity's
+`vantage_station_<m>_<s>` unique ID are unchanged.
+
+On each station device you get, in the automation UI:
+
+- **Per-button triggers** — one *pressed* / *released* trigger per
+  programmed button, e.g. **"Button 3 (Scene A) pressed"**. The button
+  label comes from the imported project (see below); without a project the
+  trigger shows the bare `Button N`. These ride the `vantage_qlink_button`
+  bus event, so they fire reliably regardless of entity state.
+- **A `Set button LED` action** — sets a button LED off / on / blink
+  (`VLD`) without leaving the device. (The `vantage_qlink.set_led` service
+  is still available for scripting.)
+
+### Project import schema (`stations[]`)
+
+`vantage_qlink.import_project` accepts an optional `stations` list that
+drives the device names, areas, and per-button trigger labels. Every field
+except `master` and `station` is optional and read defensively, so older
+payloads (and installs without a project) keep working.
+
+```json
+{
+  "load_map": { "1-1-1-1": 1001 },
+  "stations": [
+    {
+      "master": 1,
+      "station": 2,
+      "name": "Living Room Keypad",
+      "room": "Living Room",
+      "floor": "Main Level",
+      "type_name": "8-button Keypad",
+      "serial": "0001AB",
+      "buttons": [
+        { "number": 1, "label": "All On",   "function": "scene" },
+        { "number": 2, "label": "All Off",  "function": "scene" },
+        { "number": 3, "label": "Scene A",  "function": "scene" }
+      ]
+    }
+  ]
+}
+```
+
+- `name` → device name (falls back to `Vantage Station <m>-<s>`).
+- `room` → device area suggestion (only fills an *unset* area).
+- `type_name` → device model. `serial` → serial number.
+- `buttons[]` → each `{ number (1–10), label, function }`; `label` becomes
+  the trigger subtype (`Button <n> (<label>)`), `function` is metadata.
+
+Stale keypad devices (renumbered or removed, and no longer in the project
+or live discovery) can be deleted from the device page.
+
 ## License
 
 GPL-3.0, same as the upstream project it extends.
